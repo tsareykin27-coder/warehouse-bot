@@ -3,25 +3,28 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ─── WhatsApp ────────────────────────────────────────────────────────────────
-WHATSAPP_TOKEN   = os.getenv("WHATSAPP_TOKEN")
-PHONE_NUMBER_ID  = os.getenv("PHONE_NUMBER_ID")
-VERIFY_TOKEN     = os.getenv("VERIFY_TOKEN")
+# ─── Telegram ─────────────────────────────────────────────────────────────────
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# ─── Google Sheets ───────────────────────────────────────────────────────────
-SHEET_ID         = os.getenv("SHEET_ID")
+# ─── Google Sheets ────────────────────────────────────────────────────────────
+SHEET_ID = os.getenv("SHEET_ID")
 
-# ─── Authorized numbers (E.164 without the +) ───────────────────────────────
-# Example: MANAGER_NUMBERS=972501234567
-# Multiple employees: EMPLOYEE_NUMBERS=972501234568,972501234569
-MANAGER_NUMBERS  = set(filter(None, os.getenv("MANAGER_NUMBERS", "").split(",")))
-EMPLOYEE_NUMBERS = set(filter(None, os.getenv("EMPLOYEE_NUMBERS", "").split(",")))
+# ─── Authorized Telegram user IDs (numeric) ───────────────────────────────────
+# How to find a user's ID: have them message the bot — if unauthorized,
+# the bot will reply with their Telegram ID. Add it here and redeploy.
+#
+# Example:
+#   MANAGER_IDS=123456789
+#   EMPLOYEE_IDS=987654321,111222333,444555666
+
+MANAGER_IDS  = set(int(x) for x in os.getenv("MANAGER_IDS",  "").split(",") if x.strip())
+EMPLOYEE_IDS = set(int(x) for x in os.getenv("EMPLOYEE_IDS", "").split(",") if x.strip())
 
 
-def get_role(phone: str):
-    """Returns 'manager', 'employee', or None for unauthorized numbers."""
-    if phone in MANAGER_NUMBERS:
+def get_role(user_id: int):
+    """Returns 'manager', 'employee', or None for unauthorized users."""
+    if user_id in MANAGER_IDS:
         return "manager"
-    if phone in EMPLOYEE_NUMBERS:
+    if user_id in EMPLOYEE_IDS:
         return "employee"
     return None
