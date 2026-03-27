@@ -23,8 +23,8 @@ else:
 client = gspread.authorize(creds)
 wb = client.open_by_key(SHEET_ID)
 
-inv_sheet = wb.worksheet("Inventory")
-log_sheet = wb.worksheet("Log")
+inv_sheet = wb.worksheet("Sheet1")
+log_sheet = wb.worksheet("Sheet2")
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
