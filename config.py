@@ -9,12 +9,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 # --- Google Sheets ---
 SHEET_ID = os.getenv("SHEET_ID")
 
-# --- AI (Gemini) ---
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-# USE_AI=true  -> Gemini parses natural language
-# USE_AI=false -> rule-based parser only (safe fallback)
-USE_AI = os.getenv("USE_AI", "false").lower() == "true"
-
 # --- Authorized Telegram user IDs (numeric) ---
 # How to find a user's ID: message the bot — if unauthorized,
 # the bot replies with that user's Telegram ID. Add it here.

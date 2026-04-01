@@ -2,9 +2,8 @@ import os
 import re
 import requests
 from flask import Flask, request, jsonify
-from config import BOT_TOKEN, get_role, USE_AI
+from config import BOT_TOKEN, get_role
 from sheets import update_inventory, get_balance, get_unit, log_transaction, get_status, delete_log_entry, delete_all_logs
-from ai_parser import parse_with_ai
 
 DELETE_PIN = "482258"
 
@@ -108,99 +107,6 @@ def is_bulk(body: str) -> bool:
     return bool(re.match(r'^(ADD|TAKE)\s*:\s*', body.strip(), re.IGNORECASE))
 
 
-# --- AI execution ------------------------------------------------------------
-
-def execute_ai_result(parsed: dict, user_id: int, role: str) -> str:
-    """Executes a Gemini-parsed command dict using the same logic as rule-based path."""
-    action = parsed.get("action", "UNKNOWN").upper()
-
-    if action == "UNKNOWN":
-        return "I didn't understand that. Use ADD, TAKE, or STATUS."
-
-    if action == "DELETE":
-        target = str(parsed.get("target", "")).upper()
-        pin = str(parsed.get("pin", ""))
-        if role != "manager":
-            return "Only the manager can delete logs."
-        if pin != DELETE_PIN:
-            return "Wrong PIN. Deletion cancelled."
-        if target == "ALL":
-            return delete_all_logs(user_id)
-        try:
-            return delete_log_entry(int(target), user_id)
-        except ValueError:
-            return f"Invalid log number: {target}"
-
-    if action == "STATUS":
-        return get_status(parsed.get("item", "all"))
-
-    if action in ("ADD", "BULK_ADD", "TAKE", "BULK_TAKE"):
-        is_add = action in ("ADD", "BULK_ADD")
-        is_bulk_ai = action in ("BULK_ADD", "BULK_TAKE")
-        cmd = "ADD" if is_add else "TAKE"
-
-        if is_add and role != "manager":
-            return "Only the manager can add stock."
-
-        if is_bulk_ai:
-            items = parsed.get("items", [])
-            if not items:
-                return "No items found in message."
-            lines = []
-            for entry in items:
-                qty = int(entry.get("qty", 0))
-                item = entry.get("item", "").lower().strip()
-                unit = entry.get("unit", "pcs")
-                if not item or qty <= 0:
-                    continue
-                if is_add:
-                    update_inventory(item, qty, unit)
-                    balance = get_balance(item)
-                    log_transaction(user_id, role, "ADD", item, qty, balance, "")
-                    lines.append(f"  + *{item}* +{qty} {unit} -> stock: {balance} {unit}")
-                else:
-                    balance = get_balance(item)
-                    if balance is None:
-                        lines.append(f"  x *{item}* - not found")
-                        continue
-                    stored_unit = get_unit(item)
-                    if balance < qty:
-                        lines.append(f"  x *{item}* - only {balance} {stored_unit} available")
-                        continue
-                    update_inventory(item, -qty)
-                    new_bal = get_balance(item)
-                    log_transaction(user_id, role, "TAKE", item, qty, new_bal, "")
-                    lines.append(f"  - *{item}* -{qty} {stored_unit} -> remaining: {new_bal} {stored_unit}")
-            return f"*Bulk {cmd} complete:*\n" + "\n".join(lines)
-
-        else:
-            qty = int(parsed.get("qty", 0))
-            item = parsed.get("item", "").lower().strip()
-            unit = parsed.get("unit", "pcs")
-            note = parsed.get("note", "")
-            if not item or qty <= 0:
-                return "Could not extract item or quantity."
-            if is_add:
-                update_inventory(item, qty, unit)
-                balance = get_balance(item)
-                log_transaction(user_id, role, "ADD", item, qty, balance, note)
-                return f"Added *{qty} {unit} x {item}*.\nNew stock: *{balance} {unit}*."
-            else:
-                balance = get_balance(item)
-                if balance is None:
-                    return f"Item *{item}* not found. Contact manager."
-                stored_unit = get_unit(item)
-                if balance < qty:
-                    return (f"Not enough stock.\nCurrent: *{balance} {stored_unit}*\n"
-                            f"Requested: *{qty}*\nShortage: *{qty - balance}*")
-                update_inventory(item, -qty)
-                new_bal = get_balance(item)
-                log_transaction(user_id, role, "TAKE", item, qty, new_bal, note)
-                return f"TAKE *{qty} x {item}*.\nRemaining: *{new_bal} {stored_unit}*."
-
-    return "I didn't understand that. Use ADD, TAKE, or STATUS."
-
-
 # --- Business logic (rule-based) ---------------------------------------------
 
 def handle_bulk(user_id: int, role: str, command: str, items_body: str) -> str:
@@ -252,14 +158,6 @@ def handle_message(user_id: int, text: str) -> str:
             f"Your Telegram ID is: `{user_id}`\n"
             "Send this ID to your manager to get access."
         )
-
-    # --- AI path (when USE_AI=true) ---
-    if USE_AI:
-        parsed = parse_with_ai(text)
-        if parsed is not None:
-            return execute_ai_result(parsed, user_id, role)
-        # If AI fails, fall through to rule-based parser below
-        print("[AI] fallback to rule-based parser")
 
     # --- DELETE command ---
     delete_match = re.match(
