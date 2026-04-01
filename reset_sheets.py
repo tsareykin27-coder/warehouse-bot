@@ -35,8 +35,8 @@ log_sheet = wb.worksheet("Sheet2")
 
 # ── Clear Sheet1 completely and write header ──────────────────────────────────
 inv_sheet.clear()
-inv_sheet.append_row(["Item", "Unit", "Quantity", "Last Updated"])
-print("✅ Sheet1 cleared and header written: Item | Unit | Quantity | Last Updated")
+inv_sheet.append_row(["#", "Item", "Unit", "Quantity", "Last Updated"])
+print("✅ Sheet1 cleared and header written: # | Item | Unit | Quantity | Last Updated")
 
 # ── Clear Sheet2 completely and write header ──────────────────────────────────
 log_sheet.clear()

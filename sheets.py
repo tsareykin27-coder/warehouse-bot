@@ -31,7 +31,7 @@ def _ensure_headers():
     # Sheet1 header: Item | Unit | Quantity | Last Updated
     inv_row1 = inv_sheet.row_values(1)
     if not inv_row1 or inv_row1[0].strip().lower() not in ("item", "#"):
-        inv_sheet.insert_row(["Item", "Unit", "Quantity", "Last Updated"], index=1)
+        inv_sheet.insert_row(["#", "Item", "Unit", "Quantity", "Last Updated"], index=1)
 
     # Sheet2 header: # | Timestamp | User ID | Role | Action | Item | Qty | Balance After | Note
     log_row1 = log_sheet.row_values(1)
@@ -69,9 +69,23 @@ def _color_row(sheet, row_index: int, color: dict, num_cols: int = NUM_LOG_COLS)
 
 # ─── Inventory helpers ────────────────────────────────────────────────────────
 
+def _next_inv_number() -> int:
+    """Returns the next inventory row number."""
+    nums = inv_sheet.col_values(1)[1:]  # skip header
+    existing = []
+    for n in nums:
+        try:
+            existing.append(int(n))
+        except (ValueError, TypeError):
+            pass
+    return max(existing, default=0) + 1
+
+
 def _find_item_row(item: str):
-    """Returns 1-based row index of item in Sheet1, skipping header row 1."""
-    items = inv_sheet.col_values(1)
+    """Returns 1-based row index of item in Sheet1, skipping header row 1.
+    Sheet1 columns: A=# B=Item C=Unit D=Quantity E=Last Updated
+    """
+    items = inv_sheet.col_values(2)  # column B = Item
     for i, val in enumerate(items):
         if i == 0:  # skip header
             continue
@@ -80,11 +94,19 @@ def _find_item_row(item: str):
     return None
 
 
+# Sheet1 column positions (1-based)
+# A=1:#  B=2:Item  C=3:Unit  D=4:Quantity  E=5:Last Updated
+COL_ITEM = 2
+COL_UNIT = 3
+COL_QTY  = 4
+COL_TS   = 5
+
+
 def get_balance(item: str):
     row = _find_item_row(item)
     if row is None:
         return None
-    val = inv_sheet.cell(row, 3).value
+    val = inv_sheet.cell(row, COL_QTY).value
     return int(val) if val else 0
 
 
@@ -92,7 +114,7 @@ def get_unit(item: str) -> str:
     row = _find_item_row(item)
     if row is None:
         return "pcs"
-    val = inv_sheet.cell(row, 2).value
+    val = inv_sheet.cell(row, COL_UNIT).value
     return val if val else "pcs"
 
 
@@ -100,11 +122,12 @@ def update_inventory(item: str, delta: int, unit: str = "pcs"):
     row = _find_item_row(item)
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if row is None:
-        inv_sheet.append_row([item.lower(), unit, delta, ts])
+        row_num = _next_inv_number()
+        inv_sheet.append_row([row_num, item.lower(), unit, delta, ts])
     else:
-        current = int(inv_sheet.cell(row, 3).value or 0)
-        inv_sheet.update_cell(row, 3, current + delta)
-        inv_sheet.update_cell(row, 4, ts)
+        current = int(inv_sheet.cell(row, COL_QTY).value or 0)
+        inv_sheet.update_cell(row, COL_QTY, current + delta)
+        inv_sheet.update_cell(row, COL_TS, ts)
 
 
 # ─── Log helpers ──────────────────────────────────────────────────────────────
@@ -309,6 +332,7 @@ def get_status(item: str = "all") -> str:
             return "📦 Inventory is empty."
         lines = ["📦 *Inventory Status:*"]
         for r in rows:
-            if r[0]:
-                lines.append(f"  • {r[0].capitalize()}: {r[2]} {r[1]}")
+            # columns: A=# B=Item C=Unit D=Quantity E=Last Updated
+            if len(r) >= 4 and r[1]:
+                lines.append(f"  • {r[1].capitalize()}: {r[3]} {r[2]}")
         return "\n".join(lines)
