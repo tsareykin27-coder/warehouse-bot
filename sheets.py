@@ -158,12 +158,29 @@ def delete_log_entry(log_num: int, deleted_by_user_id: int):
     if action == "DELETE":
         return f"❌ Log #{log_num} is already a DELETE entry and cannot be deleted."
 
-    # Reverse inventory effect
+    # Reverse inventory effect on Sheet1
     if action == "ADD":
-        # Undo an ADD → subtract from inventory
+        # Undo an ADD — subtract qty back
+        # If balance would reach 0 after reversal, remove the item row entirely
         current = get_balance(item)
         if current is not None:
-            update_inventory(item, -qty)
+            new_val = current - qty
+            if new_val <= 0:
+                # Remove the item row from Sheet1 entirely
+                item_row = _find_item_row(item)
+                if item_row:
+                    wb.batch_update({"requests": [{
+                        "deleteDimension": {
+                            "range": {
+                                "sheetId": inv_sheet.id,
+                                "dimension": "ROWS",
+                                "startIndex": item_row - 1,
+                                "endIndex": item_row
+                            }
+                        }
+                    }]})
+            else:
+                update_inventory(item, -qty)
     elif action == "TAKE":
         # Undo a TAKE → add back to inventory
         update_inventory(item, qty)
@@ -206,11 +223,11 @@ def delete_log_entry(log_num: int, deleted_by_user_id: int):
 
 def delete_all_logs(deleted_by_user_id: int):
     """
-    Clears all rows in Sheet2 (except header) and resets Sheet1 quantities to 0.
+    Clears all rows in Sheet2 (except header).
+    Deletes all item rows from Sheet1 entirely (not zeroed — fully removed).
     Appends one DELETE audit entry.
     Returns a result message.
     """
-    # Count rows before clearing
     all_rows = log_sheet.get_all_values()
     data_rows = [r for r in all_rows[1:] if any(r)]
     count = len(data_rows)
@@ -218,15 +235,20 @@ def delete_all_logs(deleted_by_user_id: int):
     if count == 0:
         return "📋 Log is already empty."
 
-    # Reset all inventory quantities to 0 in Sheet1
+    # Delete all item rows from Sheet1 (keep header row 1)
     inv_rows = inv_sheet.get_all_values()
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for i, row in enumerate(inv_rows):
-        if i == 0:
-            continue
-        if row[0]:
-            inv_sheet.update_cell(i + 1, 3, 0)
-            inv_sheet.update_cell(i + 1, 4, ts)
+    inv_data_count = sum(1 for r in inv_rows[1:] if r[0])
+    if inv_data_count > 0:
+        wb.batch_update({"requests": [{
+            "deleteDimension": {
+                "range": {
+                    "sheetId": inv_sheet.id,
+                    "dimension": "ROWS",
+                    "startIndex": 1,
+                    "endIndex": len(inv_rows)
+                }
+            }
+        }]})
 
     # Clear all data rows in Sheet2 (keep header row 1)
     last_row = len(all_rows)
@@ -236,7 +258,7 @@ def delete_all_logs(deleted_by_user_id: int):
                 "range": {
                     "sheetId": log_sheet.id,
                     "dimension": "ROWS",
-                    "startIndex": 1,       # 0-based, so row index 1 = row 2
+                    "startIndex": 1,
                     "endIndex": last_row
                 }
             }
@@ -250,7 +272,7 @@ def delete_all_logs(deleted_by_user_id: int):
 
     return (
         f"🗑 All {count} log entries deleted.\n"
-        f"  Sheet1 inventory quantities reset to 0.\n"
+        f"  All items removed from Sheet1.\n"
         f"  Deletion logged as entry #1."
     )
 
