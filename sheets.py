@@ -70,6 +70,35 @@ def log_transaction(user_id: int, role: str, action: str,
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_sheet.append_row([ts, str(user_id), role, action, item.lower(), qty, balance_after, note])
 
+    # Color the row: green for ADD, red for TAKE
+    row_index = len(log_sheet.col_values(1))  # last filled row
+    if action.upper() == "ADD":
+        bg_color = {"red": 0.714, "green": 0.843, "blue": 0.659}   # soft green
+    else:
+        bg_color = {"red": 0.918, "green": 0.6,   "blue": 0.6}     # soft red
+
+    num_cols = 8
+    requests_body = [
+        {
+            "repeatCell": {
+                "range": {
+                    "sheetId": log_sheet.id,
+                    "startRowIndex": row_index - 1,
+                    "endRowIndex": row_index,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": num_cols
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "backgroundColor": bg_color
+                    }
+                },
+                "fields": "userEnteredFormat.backgroundColor"
+            }
+        }
+    ]
+    wb.batch_update({"requests": requests_body})
+
 
 def get_status(item: str = "all") -> str:
     if item and item.lower() != "all":
