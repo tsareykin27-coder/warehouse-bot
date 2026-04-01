@@ -24,6 +24,22 @@ wb = client.open_by_key(SHEET_ID)
 inv_sheet = wb.worksheet("Sheet1")
 log_sheet = wb.worksheet("Sheet2")
 
+# ─── Ensure headers exist ─────────────────────────────────────────────────────
+
+def _ensure_headers():
+    """Write header rows if the sheets are empty or missing headers."""
+    # Sheet1 header: Item | Unit | Quantity | Last Updated
+    inv_row1 = inv_sheet.row_values(1)
+    if not inv_row1 or inv_row1[0].strip().lower() not in ("item", "#"):
+        inv_sheet.insert_row(["Item", "Unit", "Quantity", "Last Updated"], index=1)
+
+    # Sheet2 header: # | Timestamp | User ID | Role | Action | Item | Qty | Balance After | Note
+    log_row1 = log_sheet.row_values(1)
+    if not log_row1 or log_row1[0].strip() not in ("#", "log#", "log #"):
+        log_sheet.insert_row(["#", "Timestamp", "User ID", "Role", "Action", "Item", "Qty", "Balance After", "Note"], index=1)
+
+_ensure_headers()
+
 # Colors
 GREEN  = {"red": 0.714, "green": 0.843, "blue": 0.659}
 RED    = {"red": 0.918, "green": 0.6,   "blue": 0.6}
@@ -54,8 +70,11 @@ def _color_row(sheet, row_index: int, color: dict, num_cols: int = NUM_LOG_COLS)
 # ─── Inventory helpers ────────────────────────────────────────────────────────
 
 def _find_item_row(item: str):
+    """Returns 1-based row index of item in Sheet1, skipping header row 1."""
     items = inv_sheet.col_values(1)
     for i, val in enumerate(items):
+        if i == 0:  # skip header
+            continue
         if val.strip().lower() == item.strip().lower():
             return i + 1
     return None
