@@ -1,16 +1,15 @@
 """
 Exports Sheet1 (Inventory) as a PDF and emails it to the specified address.
 Called when the manager sends: EXPORT to someone@example.com
+Uses SendGrid API (works on Render free tier — SMTP is blocked).
 """
 
 import os
-import smtplib
+import base64
 import io
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email.mime.text import MIMEText
-from email import encoders
 from datetime import datetime
+
+import requests as http_requests
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -18,7 +17,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 
-from config import GMAIL_SENDER, GMAIL_APP_PASSWORD
+from config import SENDGRID_API_KEY, GMAIL_SENDER
 from sheets import inv_sheet
 
 
@@ -92,9 +91,9 @@ def build_pdf() -> bytes:
 
 
 def send_export_email(to_email: str) -> str:
-    """Builds the PDF and emails it. Returns a status message string."""
-    if not GMAIL_SENDER or not GMAIL_APP_PASSWORD:
-        return "❌ Email not configured. Set GMAIL_SENDER and GMAIL_APP_PASSWORD in Render."
+    """Builds the PDF and emails it via SendGrid. Returns a status message string."""
+    if not SENDGRID_API_KEY or not GMAIL_SENDER:
+        return "❌ Email not configured. Set SENDGRID_API_KEY and GMAIL_SENDER in Render."
 
     try:
         pdf_bytes = build_pdf()
@@ -103,41 +102,44 @@ def send_export_email(to_email: str) -> str:
 
     ts_label = datetime.now().strftime("%Y-%m-%d_%H-%M")
     filename = f"inventory_{ts_label}.pdf"
+    pdf_b64 = base64.b64encode(pdf_bytes).decode()
 
-    # Build email
-    msg = MIMEMultipart()
-    msg["From"] = GMAIL_SENDER
-    msg["To"] = to_email
-    msg["Subject"] = f"Warehouse Inventory Export — {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-
+    subject = f"Warehouse Inventory Export — {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     body = (
-        "Please find the current warehouse inventory report attached.\n\n"
+        f"Please find the current warehouse inventory report attached.\n\n"
         f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        "— Warehouse Bot"
+        f"— Warehouse Bot"
     )
-    msg.attach(MIMEText(body, "plain"))
 
-    # Attach PDF
-    part = MIMEBase("application", "octet-stream")
-    part.set_payload(pdf_bytes)
-    encoders.encode_base64(part)
-    part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
-    msg.attach(part)
+    payload = {
+        "personalizations": [{"to": [{"email": to_email}]}],
+        "from": {"email": GMAIL_SENDER},
+        "subject": subject,
+        "content": [{"type": "text/plain", "value": body}],
+        "attachments": [{
+            "content": pdf_b64,
+            "type": "application/pdf",
+            "filename": filename,
+            "disposition": "attachment"
+        }]
+    }
 
-    # Send via Gmail SMTP (port 587 with STARTTLS — port 465 is blocked on Render)
     try:
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(GMAIL_SENDER, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_SENDER, to_email, msg.as_string())
-    except smtplib.SMTPAuthenticationError:
-        return "❌ Gmail authentication failed. Check GMAIL_APP_PASSWORD in Render."
+        resp = http_requests.post(
+            "https://api.sendgrid.com/v3/mail/send",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {SENDGRID_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            timeout=15
+        )
+        if resp.status_code == 202:
+            return (
+                f"✅ Inventory exported and sent to *{to_email}*.\n"
+                f"  File: `{filename}`"
+            )
+        else:
+            return f"❌ SendGrid error {resp.status_code}: {resp.text[:200]}"
     except Exception as e:
         return f"❌ Failed to send email: {e}"
-
-    return (
-        f"✅ Inventory exported and sent to *{to_email}*.\n"
-        f"  File: `{filename}`"
-    )
