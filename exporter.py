@@ -124,9 +124,12 @@ def send_export_email(to_email: str) -> str:
     part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
     msg.attach(part)
 
-    # Send via Gmail SMTP
+    # Send via Gmail SMTP (port 587 with STARTTLS — port 465 is blocked on Render)
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
             server.login(GMAIL_SENDER, GMAIL_APP_PASSWORD)
             server.sendmail(GMAIL_SENDER, to_email, msg.as_string())
     except smtplib.SMTPAuthenticationError:
