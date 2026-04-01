@@ -105,8 +105,22 @@ def parse_with_ai(user_message: str) -> dict | None:
         print(f"[AI] parsed: {parsed}")
         return parsed
 
-    except Exception as e:
+    except requests.exceptions.HTTPError as e:
         # Scrub the API key from the error message before logging
+        safe_error = str(e)
+        if GEMINI_API_KEY:
+            safe_error = safe_error.replace(GEMINI_API_KEY, "***")
+        # Print the full response body so we can see the exact quota error
+        try:
+            body = e.response.json()
+            body_str = json.dumps(body)
+            if GEMINI_API_KEY:
+                body_str = body_str.replace(GEMINI_API_KEY, "***")
+            print(f"[AI] failed: {safe_error} | body: {body_str}")
+        except Exception:
+            print(f"[AI] failed: {safe_error}")
+        return None
+    except Exception as e:
         safe_error = str(e)
         if GEMINI_API_KEY:
             safe_error = safe_error.replace(GEMINI_API_KEY, "***")
