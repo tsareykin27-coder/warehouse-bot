@@ -3,7 +3,9 @@ import re
 import requests
 from flask import Flask, request, jsonify
 from config import BOT_TOKEN, get_role
-from sheets import update_inventory, get_balance, get_unit, log_transaction, get_status
+from sheets import update_inventory, get_balance, get_unit, log_transaction, get_status, delete_log_entry, delete_all_logs
+
+DELETE_PIN = "482258"
 
 app = Flask(__name__)
 
@@ -214,6 +216,27 @@ def handle_message(user_id: int, text: str) -> str:
             "Send this ID to your manager to get access."
         )
 
+    # ── DELETE command ──
+    # Formats accepted:
+    #   DELETE ALL 482258
+    #   DELETE LOG 12 482258
+    #   DELETE LOG NUMBER 12 482258
+    delete_match = re.match(
+        r'^DELETE\s+(?:LOG\s+)?(?:NUMBER\s+)?(\d+|ALL)\s+(\d+)$',
+        text.strip(), re.IGNORECASE
+    )
+    if delete_match:
+        if role != "manager":
+            return "⛔ Only the manager can delete logs."
+        target  = delete_match.group(1).upper()   # log number or ALL
+        pin     = delete_match.group(2)
+        if pin != DELETE_PIN:
+            return "⛔ Wrong PIN. Deletion cancelled."
+        if target == "ALL":
+            return delete_all_logs(user_id)
+        else:
+            return delete_log_entry(int(target), user_id)
+
     # ── Bulk mode: ADD: or TAKE: followed by items ──
     if is_bulk(text):
         match = re.match(r'^(ADD|TAKE)\s*:\s*(.+)', text.strip(), re.IGNORECASE | re.DOTALL)
@@ -231,7 +254,9 @@ def handle_message(user_id: int, text: str) -> str:
                 "❓ Unknown command. Use:\n"
                 "  • `ADD [qty] [item]`\n"
                 "  • `TAKE [qty] [item]`\n"
-                "  • `STATUS [item]`  or  `STATUS ALL`\n\n"
+                "  • `STATUS [item]`  or  `STATUS ALL`\n"
+                "  • `DELETE LOG 12 [pin]`\n"
+                "  • `DELETE ALL [pin]`\n\n"
                 "Bulk format:\n"
                 "  `ADD:\n  50 gloves\n  13 tubes\n  40 masks`"
             ),
