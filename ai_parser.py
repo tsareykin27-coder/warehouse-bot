@@ -14,10 +14,9 @@ import json
 import requests
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_URL = (
+GEMINI_BASE_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     "gemini-2.0-flash-lite:generateContent"
-    f"?key={GEMINI_API_KEY}"
 )
 
 SYSTEM_PROMPT = """
@@ -89,7 +88,8 @@ def parse_with_ai(user_message: str) -> dict | None:
     }
 
     try:
-        resp = requests.post(GEMINI_URL, json=payload, timeout=8)
+        url = f"{GEMINI_BASE_URL}?key={GEMINI_API_KEY}"
+        resp = requests.post(url, json=payload, timeout=8)
         resp.raise_for_status()
         data = resp.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -106,5 +106,9 @@ def parse_with_ai(user_message: str) -> dict | None:
         return parsed
 
     except Exception as e:
-        print(f"[AI] failed: {e}")
+        # Scrub the API key from the error message before logging
+        safe_error = str(e)
+        if GEMINI_API_KEY:
+            safe_error = safe_error.replace(GEMINI_API_KEY, "***")
+        print(f"[AI] failed: {safe_error}")
         return None
