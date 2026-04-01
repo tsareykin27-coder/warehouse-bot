@@ -4,6 +4,7 @@ import requests
 from flask import Flask, request, jsonify
 from config import BOT_TOKEN, get_role
 from sheets import update_inventory, get_balance, get_unit, log_transaction, get_status, delete_log_entry, delete_all_logs
+from exporter import send_export_email
 
 DELETE_PIN = "482258"
 
@@ -159,6 +160,14 @@ def handle_message(user_id: int, text: str) -> str:
             "Send this ID to your manager to get access."
         )
 
+    # --- EXPORT command ---
+    export_match = re.match(r'^EXPORT\s+(?:TO\s+)?([\w.+\-]+@[\w.\-]+\.[a-zA-Z]{2,})$', text.strip(), re.IGNORECASE)
+    if export_match:
+        if role != "manager":
+            return "Only the manager can export inventory."
+        to_email = export_match.group(1)
+        return send_export_email(to_email)
+
     # --- DELETE command ---
     delete_match = re.match(
         r'^DELETE\s+(?:LOG\s+)?(?:NUMBER\s+)?(\d+|ALL)\s+(\d+)$',
@@ -194,6 +203,7 @@ def handle_message(user_id: int, text: str) -> str:
                 "  - `ADD [qty] [item]`\n"
                 "  - `TAKE [qty] [item]`\n"
                 "  - `STATUS [item]` or `STATUS ALL`\n"
+                "  - `EXPORT TO email@example.com`\n"
                 "  - `DELETE LOG 12 [pin]`\n"
                 "  - `DELETE ALL [pin]`\n\n"
                 "Bulk format:\n"

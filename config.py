@@ -9,6 +9,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 # --- Google Sheets ---
 SHEET_ID = os.getenv("SHEET_ID")
 
+# --- Email (for EXPORT command) ---
+GMAIL_SENDER       = os.getenv("GMAIL_SENDER", "")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
+
 # --- Authorized Telegram user IDs (numeric) ---
 # How to find a user's ID: message the bot — if unauthorized,
 # the bot replies with that user's Telegram ID. Add it here.
