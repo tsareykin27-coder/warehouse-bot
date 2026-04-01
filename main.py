@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 from flask import Flask, request, jsonify
 from config import BOT_TOKEN, get_role
@@ -9,7 +10,7 @@ app = Flask(__name__)
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
-# ─── Telegram sender ─────────────────────────────────────────────────────────
+# ─── Telegram sender ──────────────────────────────────────────────────────────
 
 def send_message(chat_id: int, text: str):
     url = f"{TELEGRAM_API}/sendMessage"
@@ -22,17 +23,49 @@ def send_message(chat_id: int, text: str):
     print(f"[TG] → {chat_id}: {text[:60]} | status={resp.status_code}")
 
 
-# ─── Message parser ───────────────────────────────────────────────────────────
+# ─── Parsers ──────────────────────────────────────────────────────────────────
+
+def parse_bulk_items(body: str):
+    """
+    Parses bulk format after the command keyword.
+    Supports:
+      - Newline separated:  "50 gloves\n13 tubes\n40 masks"
+      - Comma separated:    "50 gloves, 13 tubes, 40 masks"
+      - Mixed punctuation:  "50 gloves, 13 tubes. 40 masks"
+
+    Returns list of (qty, item) tuples.
+    Raises ValueError if any line is unparseable.
+    """
+    # Split on newlines or commas or periods
+    parts = re.split(r'[\n,\.]+', body)
+    results = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        tokens = part.split()
+        if len(tokens) < 2:
+            raise ValueError(f"bad_line:{part}")
+        try:
+            qty = int(tokens[0].replace(",", ""))
+            if qty <= 0:
+                raise ValueError(f"bad_qty:{part}")
+        except ValueError:
+            raise ValueError(f"bad_line:{part}")
+        item = " ".join(tokens[1:]).lower().strip()
+        results.append((qty, item))
+    if not results:
+        raise ValueError("empty")
+    return results
+
 
 def parse_command(body: str):
     """
-    Returns (command, qty, item, note)
+    Returns (command, qty, item, note) for single-item commands.
     Raises ValueError with a code on bad input.
     Supports quoted item names: TAKE 5 "first aid kit"
     """
-    import re
     body = body.strip()
-    # Strip leading slash if user types /add, /take, /status
     if body.startswith("/"):
         body = body[1:]
 
@@ -56,7 +89,6 @@ def parse_command(body: str):
         except (ValueError, AttributeError):
             raise ValueError("bad_qty")
 
-        # Support quoted item names: ADD 10 "oxygen mask"
         rest = body[len(tokens[0]):].strip()
         rest = rest[len(tokens[1]):].strip()
 
@@ -74,7 +106,60 @@ def parse_command(body: str):
     raise ValueError("unknown_command")
 
 
+def is_bulk(body: str) -> bool:
+    """
+    Detects bulk format:
+      ADD:          (followed by newline or comma-separated items)
+      TAKE:
+    """
+    return bool(re.match(r'^(ADD|TAKE)\s*:\s*', body.strip(), re.IGNORECASE))
+
+
 # ─── Business logic ───────────────────────────────────────────────────────────
+
+def handle_bulk(user_id: int, role: str, command: str, items_body: str) -> str:
+    """Processes a bulk ADD or TAKE and returns a summary reply."""
+    try:
+        items = parse_bulk_items(items_body)
+    except ValueError as e:
+        err = str(e)
+        if err.startswith("bad_line:"):
+            line = err.split(":", 1)[1]
+            return f"❓ Could not read this line: `{line}`\nFormat: `50 gloves` (number then item name)"
+        if err.startswith("bad_qty:"):
+            line = err.split(":", 1)[1]
+            return f"❓ Invalid quantity in: `{line}`"
+        return "❓ Could not parse items. Use:\n`ADD:\n50 gloves\n13 tubes\n40 masks`"
+
+    if command == "ADD" and role != "manager":
+        return "⛔ Only the manager can add stock."
+
+    lines = []
+    for qty, item in items:
+        if command == "ADD":
+            update_inventory(item, qty)
+            balance = get_balance(item)
+            unit = get_unit(item)
+            log_transaction(user_id, role, "ADD", item, qty, balance, "")
+            lines.append(f"  ✅ *{item}* +{qty} → stock: {balance} {unit}")
+
+        elif command == "TAKE":
+            balance = get_balance(item)
+            if balance is None:
+                lines.append(f"  ❌ *{item}* — not found in inventory")
+                continue
+            unit = get_unit(item)
+            if balance < qty:
+                lines.append(f"  ❌ *{item}* — only {balance} {unit} available, requested {qty}")
+                continue
+            update_inventory(item, -qty)
+            new_balance = get_balance(item)
+            log_transaction(user_id, role, "TAKE", item, qty, new_balance, "")
+            lines.append(f"  ✅ *{item}* -{qty} → remaining: {new_balance} {unit}")
+
+    header = "📦 *Bulk ADD complete:*" if command == "ADD" else "📦 *Bulk TAKE complete:*"
+    return header + "\n" + "\n".join(lines)
+
 
 def handle_message(user_id: int, text: str) -> str:
     role = get_role(user_id)
@@ -85,6 +170,15 @@ def handle_message(user_id: int, text: str) -> str:
             "Send this ID to your manager to get access."
         )
 
+    # ── Bulk mode: ADD: or TAKE: followed by items ──
+    if is_bulk(text):
+        match = re.match(r'^(ADD|TAKE)\s*:\s*(.+)', text.strip(), re.IGNORECASE | re.DOTALL)
+        if match:
+            command = match.group(1).upper()
+            items_body = match.group(2)
+            return handle_bulk(user_id, role, command, items_body)
+
+    # ── Single command mode ──
     try:
         command, qty, item, note = parse_command(text)
     except ValueError as e:
@@ -93,7 +187,9 @@ def handle_message(user_id: int, text: str) -> str:
                 "❓ Unknown command. Use:\n"
                 "  • `ADD [qty] [item]`\n"
                 "  • `TAKE [qty] [item]`\n"
-                "  • `STATUS [item]`  or  `STATUS ALL`"
+                "  • `STATUS [item]`  or  `STATUS ALL`\n\n"
+                "Bulk format:\n"
+                "  `ADD:\n  50 gloves\n  13 tubes\n  40 masks`"
             ),
             "missing_args": "❓ Usage: `ADD [qty] [item]`  or  `TAKE [qty] [item]`\nExample: `ADD 50 gloves`",
             "bad_qty":      "❓ Quantity must be a positive number.\nExample: `TAKE 5 gloves`",
