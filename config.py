@@ -10,8 +10,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 SHEET_ID = os.getenv("SHEET_ID")
 
 # --- Email (for EXPORT command) ---
-GMAIL_SENDER      = os.getenv("GMAIL_SENDER", "")   # shown as sender address
-SENDGRID_API_KEY  = os.getenv("SENDGRID_API_KEY", "")  # sendgrid.com free tier
+GMAIL_SENDER    = os.getenv("GMAIL_SENDER", "")    # sender address (use onboarding@resend.dev for free tier)
+RESEND_API_KEY  = os.getenv("RESEND_API_KEY", "")  # resend.com free tier
 
 # --- Authorized Telegram user IDs (numeric) ---
 # How to find a user's ID: message the bot — if unauthorized,

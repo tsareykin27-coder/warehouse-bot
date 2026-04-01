@@ -17,7 +17,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 
-from config import SENDGRID_API_KEY, GMAIL_SENDER
+from config import RESEND_API_KEY, GMAIL_SENDER
 from sheets import inv_sheet
 
 
@@ -91,9 +91,9 @@ def build_pdf() -> bytes:
 
 
 def send_export_email(to_email: str) -> str:
-    """Builds the PDF and emails it via SendGrid. Returns a status message string."""
-    if not SENDGRID_API_KEY or not GMAIL_SENDER:
-        return "❌ Email not configured. Set SENDGRID_API_KEY and GMAIL_SENDER in Render."
+    """Builds the PDF and emails it via Resend. Returns a status message string."""
+    if not RESEND_API_KEY or not GMAIL_SENDER:
+        return "❌ Email not configured. Set RESEND_API_KEY and GMAIL_SENDER in Render."
 
     try:
         pdf_bytes = build_pdf()
@@ -112,34 +112,32 @@ def send_export_email(to_email: str) -> str:
     )
 
     payload = {
-        "personalizations": [{"to": [{"email": to_email}]}],
-        "from": {"email": GMAIL_SENDER},
+        "from": GMAIL_SENDER,
+        "to": [to_email],
         "subject": subject,
-        "content": [{"type": "text/plain", "value": body}],
+        "text": body,
         "attachments": [{
-            "content": pdf_b64,
-            "type": "application/pdf",
             "filename": filename,
-            "disposition": "attachment"
+            "content": pdf_b64
         }]
     }
 
     try:
         resp = http_requests.post(
-            "https://api.sendgrid.com/v3/mail/send",
+            "https://api.resend.com/emails",
             json=payload,
             headers={
-                "Authorization": f"Bearer {SENDGRID_API_KEY}",
+                "Authorization": f"Bearer {RESEND_API_KEY}",
                 "Content-Type": "application/json"
             },
             timeout=15
         )
-        if resp.status_code == 202:
+        if resp.status_code == 200:
             return (
                 f"✅ Inventory exported and sent to *{to_email}*.\n"
                 f"  File: `{filename}`"
             )
         else:
-            return f"❌ SendGrid error {resp.status_code}: {resp.text[:200]}"
+            return f"❌ Resend error {resp.status_code}: {resp.text[:200]}"
     except Exception as e:
         return f"❌ Failed to send email: {e}"
