@@ -23,6 +23,49 @@ def send_message(chat_id: int, text: str):
     print(f"[TG] → {chat_id}: {text[:60]} | status={resp.status_code}")
 
 
+# ─── Unit extractor ─────────────────────────────────────────────────────────
+
+# Known unit keywords (singular and plural)
+UNIT_KEYWORDS = [
+    "boxes", "box",
+    "kits", "kit",
+    "packs", "pack", "package", "packages",
+    "bags", "bag",
+    "bottles", "bottle",
+    "rolls", "roll",
+    "pairs", "pair",
+    "sets", "set",
+    "units", "unit",
+    "pcs", "pc",
+    "pieces", "piece",
+    "vials", "vial",
+    "ampules", "ampule",
+    "tubes", "tube",
+    "cans", "can",
+    "sheets", "sheet",
+    "doses", "dose",
+]
+
+def extract_unit(raw_item: str):
+    """
+    Given a raw item string like 'glove boxes' or 'chest tube kits',
+    returns (item, unit).
+    If the last word is a known unit keyword, splits it off.
+    Otherwise returns (raw_item, 'pcs').
+
+    Examples:
+      'glove boxes'     → ('gloves', 'boxes')
+      'chest tube kits' → ('chest tube', 'kits')
+      'gloves'          → ('gloves', 'pcs')
+    """
+    words = raw_item.strip().lower().split()
+    if len(words) >= 2 and words[-1] in UNIT_KEYWORDS:
+        unit = words[-1]
+        item = " ".join(words[:-1])
+        return item, unit
+    return raw_item.strip().lower(), "pcs"
+
+
 # ─── Parsers ──────────────────────────────────────────────────────────────────
 
 def parse_bulk_items(body: str):
@@ -52,8 +95,9 @@ def parse_bulk_items(body: str):
                 raise ValueError(f"bad_qty:{part}")
         except ValueError:
             raise ValueError(f"bad_line:{part}")
-        item = " ".join(tokens[1:]).lower().strip()
-        results.append((qty, item))
+        raw_item = " ".join(tokens[1:]).lower().strip()
+        item, unit = extract_unit(raw_item)
+        results.append((qty, item, unit))
     if not results:
         raise ValueError("empty")
     return results
@@ -77,7 +121,7 @@ def parse_command(body: str):
 
     if command == "STATUS":
         item = tokens[1].lower() if len(tokens) > 1 else "all"
-        return command, None, item, ""
+        return command, None, item, "", "pcs"
 
     if command in ("ADD", "TAKE"):
         if len(tokens) < 3:
@@ -94,16 +138,17 @@ def parse_command(body: str):
 
         quoted = re.match(r'^"([^"]+)"(.*)', rest)
         if quoted:
-            item = quoted.group(1).lower().strip()
+            raw_item = quoted.group(1).lower().strip()
             note = quoted.group(2).strip()
         else:
             item_tokens = rest.split()
-            item = item_tokens[0].lower()
-            note = " ".join(item_tokens[1:])
+            raw_item = " ".join(item_tokens).lower()
+            note = ""
 
-        return command, qty, item, note
+        item, unit = extract_unit(raw_item)
+        return command, qty, item, note, unit
 
-    raise ValueError("unknown_command")
+    raise ValueError("unknown_command")  # parse_command ends here
 
 
 def is_bulk(body: str) -> bool:
@@ -135,27 +180,26 @@ def handle_bulk(user_id: int, role: str, command: str, items_body: str) -> str:
         return "⛔ Only the manager can add stock."
 
     lines = []
-    for qty, item in items:
+    for qty, item, unit in items:
         if command == "ADD":
-            update_inventory(item, qty)
+            update_inventory(item, qty, unit)
             balance = get_balance(item)
-            unit = get_unit(item)
             log_transaction(user_id, role, "ADD", item, qty, balance, "")
-            lines.append(f"  ✅ *{item}* +{qty} → stock: {balance} {unit}")
+            lines.append(f"  ✅ *{item}* +{qty} {unit} → stock: {balance} {unit}")
 
         elif command == "TAKE":
             balance = get_balance(item)
             if balance is None:
                 lines.append(f"  ❌ *{item}* — not found in inventory")
                 continue
-            unit = get_unit(item)
+            stored_unit = get_unit(item)
             if balance < qty:
-                lines.append(f"  ❌ *{item}* — only {balance} {unit} available, requested {qty}")
+                lines.append(f"  ❌ *{item}* — only {balance} {stored_unit} available, requested {qty}")
                 continue
             update_inventory(item, -qty)
             new_balance = get_balance(item)
             log_transaction(user_id, role, "TAKE", item, qty, new_balance, "")
-            lines.append(f"  ✅ *{item}* -{qty} → remaining: {new_balance} {unit}")
+            lines.append(f"  ✅ *{item}* -{qty} {stored_unit} → remaining: {new_balance} {stored_unit}")
 
     header = "📦 *Bulk ADD complete:*" if command == "ADD" else "📦 *Bulk TAKE complete:*"
     return header + "\n" + "\n".join(lines)
@@ -180,7 +224,7 @@ def handle_message(user_id: int, text: str) -> str:
 
     # ── Single command mode ──
     try:
-        command, qty, item, note = parse_command(text)
+        command, qty, item, note, unit = parse_command(text)
     except ValueError as e:
         hints = {
             "unknown_command": (
@@ -205,11 +249,10 @@ def handle_message(user_id: int, text: str) -> str:
     if command == "ADD":
         if role != "manager":
             return "⛔ Only the manager can add stock.\nUse `TAKE` to log what you take from the warehouse."
-        update_inventory(item, qty)
+        update_inventory(item, qty, unit)
         balance = get_balance(item)
-        unit = get_unit(item)
         log_transaction(user_id, role, "ADD", item, qty, balance, note)
-        return f"✅ Added *{qty} × {item}*.\nNew stock: *{balance} {unit}*."
+        return f"✅ Added *{qty} {unit} × {item}*.\nNew stock: *{balance} {unit}*."
 
     # ── TAKE ──
     if command == "TAKE":
